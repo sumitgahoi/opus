@@ -3,6 +3,9 @@
 Read REQUIREMENTS.md before changing code. It contains the project's
 scope, architecture, acceptance criteria, and current milestone.
 
+Scale: design for ~1M songs worst case across music-*. Keep inventory,
+log, and sync paths fluent at that size (see Scale in REQUIREMENTS.md).
+
 ## Working style
 
 - Prefer small, single-purpose, composable code.

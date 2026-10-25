@@ -9,6 +9,14 @@ Clients read the catalog, send user actions, and keep their own
 playback, offline caches, and search indexes. Those are not this
 server's job.
 
+## Scale
+
+Worst case across the music-* system is about **one million songs**.
+Design for that: indexed inventory and log reads, bounded pages,
+no full-library walks on request paths, and sync/bootstrap that stay
+responsive at that size. Prefer the path that stays fluent at 1M over
+the path that is only fine for a few thousand.
+
 ## Architecture decisions
 
 - Server: Go and SQLite, developed on a Debian Linux VM.
