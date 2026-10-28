@@ -162,27 +162,26 @@ seq-returning keepalive for clients that already pull on foreground.
 linux/arm64.
 - The install instructions are in README.md. They download the latest
 install.sh and run it. A checkout is not required. That script
-installs the server. When the binary and configuration are already
+installs the binary, unit, uninstaller, and conf. It does not enable
+or start the service; it prints the next steps (edit the conf, then
+enable and start). When the binary and configuration are already
 present, the same script upgrades: it replaces the binary, the unit,
 and uninstall.sh, and appends config keys that are not set yet.
-- The systemd unit is enabled at boot and restarts on failure once
-the operator has started it after editing the conf. The service
-runs as the opus user, which needs read access to the music folder.
+- After the operator enables the service, it starts at boot and
+restarts on failure. The service runs as the opus user, which needs
+read access to the music folder.
 - uninstall.sh is installed next to the binary at
 /usr/local/bin/uninstall.sh. It removes the service and the binary.
 It asks whether to leave the database and artwork cache, or to
 remove those too. --keep-data and --purge make that choice without
 asking. The conf file and the music folder stay.
 - The server reads /etc/opus/opus.conf. The installer ships the
-default conf, enables the systemd unit, and leaves the service
-stopped. It prints a note to edit the conf (music_root,
-authorized_users, and at least one of apple_client_ids or
-google_client_id), then start the service. An upgrade keeps existing
-values and appends keys that are not set yet. The database path and
-scan interval stay server defaults. The listen address defaults to
-0.0.0.0:80. The systemd unit grants CAP_NET_BIND_SERVICE so the
-opus user can bind port 80. The database and the artwork cache live
-under /var/lib/opus.
+default conf. The operator sets music_root, authorized_users, and at
+least one of apple_client_ids or google_client_id before enabling the
+service. The database path and scan interval stay server defaults.
+The listen address defaults to 0.0.0.0:80. The systemd unit grants
+CAP_NET_BIND_SERVICE so the opus user can bind port 80. The database
+and the artwork cache live under /var/lib/opus.
 
 ## Development strategy
 

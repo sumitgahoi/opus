@@ -118,11 +118,12 @@ if grep -q '^MUSIC_' "$conf"; then
 fi
 conf_mode=$(stat -c %a "$conf" 2>/dev/null || stat -f %Lp "$conf")
 [ "$conf_mode" = 640 ] || fail "config mode is $conf_mode"
-grep -q '^enable opus$' "$prefix/systemctl.log" || fail "service was not enabled"
-if grep -q 'enable --now' "$prefix/systemctl.log"; then
-  fail "new install started the service before the conf was edited"
+if grep -qE '^(enable|start|restart) ' "$prefix/systemctl.log"; then
+  fail "new install must not enable or start the service"
 fi
-grep -q "Edit $conf, then: systemctl start opus" "$tmp/install.out" || fail "install did not tell the operator to edit the conf"
+grep -q 'daemon-reload' "$prefix/systemctl.log" || fail "unit was not reloaded"
+grep -q 'Next steps:' "$tmp/install.out" || fail "install did not print follow-up steps"
+grep -q "systemctl enable --now opus" "$tmp/install.out" || fail "install did not tell the operator to enable the service"
 grep -q 'Installing Opus for linux/amd64.' "$tmp/install.out" || fail "install did not report the architecture"
 
 # A second run sees the existing server and upgrades without asking again.

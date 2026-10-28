@@ -14,17 +14,16 @@ usage() {
   cat <<'EOF'
 Usage: install.sh [vX.Y.Z]
 
-Download the binary for this machine, install the systemd service, and
-enable it. When Opus is already installed, replace the binary and the
-unit, and add config keys that are not set yet.
+Download the binary for this machine and install the systemd unit and
+config. It does not enable or start the service. When Opus is already
+installed, replace the binary and the unit, and add config keys that
+are not set yet.
 
   vX.Y.Z   release tag; the default is the latest GitHub release
 
-A new install writes /etc/opus/opus.conf and enables the service
-without starting it. Edit the conf, then start the service.
-Uninstall with /usr/local/bin/uninstall.sh. Set OPUS_RELEASE_BASE
-to a directory or URL of release assets to install from somewhere
-other than GitHub.
+Uninstall with /usr/local/bin/uninstall.sh. Set OPUS_RELEASE_BASE to
+a directory or URL of release assets to install from somewhere other
+than GitHub.
 EOF
 }
 
@@ -342,9 +341,8 @@ already_installed() {
   [ -x "$bin_path" ] && [ -f "$conf_path" ]
 }
 
-enable_service() {
+reload_unit() {
   run_systemctl daemon-reload
-  run_systemctl enable "$service"
 }
 
 restart_if_active() {
@@ -357,6 +355,18 @@ restart_if_active() {
   fi
 }
 
+print_next_steps() {
+  cat <<EOF
+Next steps:
+  1. Edit $conf_path
+     Set music_root, authorized_users, and apple_client_ids and/or
+     google_client_id.
+  2. systemctl enable --now $service
+  3. systemctl status $service
+Uninstall with $uninstall_path
+EOF
+}
+
 cmd_install() {
   require_arch
   printf 'Installing Opus for linux/%s.\n' "$arch"
@@ -365,10 +375,9 @@ cmd_install() {
   install_binary "opus-linux-${arch}"
   install_unit
   install_uninstaller
-  enable_service
-  printf 'Installed %s and enabled %s.\n' "$bin_path" "$service"
-  printf 'Edit %s, then: systemctl start %s\n' "$conf_path" "$service"
-  printf 'Uninstall with %s.\n' "$uninstall_path"
+  reload_unit
+  printf 'Installed %s.\n' "$bin_path"
+  print_next_steps
 }
 
 cmd_upgrade() {

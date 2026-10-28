@@ -14,13 +14,10 @@ wget -O /tmp/install.sh https://github.com/sumitgahoi/opus/releases/latest/downl
 sudo bash /tmp/install.sh
 ```
 
-On a new install it downloads the binary for this machine
-(linux/amd64 or linux/arm64), installs the systemd `opus` unit, and
-enables it without starting. Edit `/etc/opus/opus.conf` (`music_root`,
-`authorized_users`, and an Apple or Google client id), then
-`systemctl start opus`. Once started, the service comes up on boot
-and restarts after a crash. It listens on port **80** (`http://host`
-with no port in the client URL).
+It installs the binary, unit, and conf, then prints the next steps.
+Edit `/etc/opus/opus.conf`, then enable and start the service. Once
+enabled, it comes up on boot and restarts after a crash. It listens on
+port **80** (`http://host` with no port in the client URL).
 
 Uninstall with the script installed next to the binary:
 
