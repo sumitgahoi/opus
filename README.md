@@ -10,7 +10,7 @@ Download the latest installer and run it. The same command installs a
 new server or upgrades one that is already installed.
 
 ```
-wget -O /tmp/install.sh https://github.com/sumitgahoi/music-server/releases/latest/download/install.sh
+wget -O /tmp/install.sh https://github.com/sumitgahoi/opus/releases/latest/download/install.sh
 sudo bash /tmp/install.sh
 ```
 

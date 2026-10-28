@@ -2,7 +2,7 @@
 # Install, upgrade, or remove the Opus systemd service.
 set -euo pipefail
 
-repo=${OPUS_REPO:-sumitgahoi/music-server}
+repo=${OPUS_REPO:-sumitgahoi/opus}
 service=opus
 
 die() {
