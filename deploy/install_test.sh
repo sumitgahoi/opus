@@ -78,12 +78,10 @@ prefix=$tmp/checksum
 rel=$tmp/bad-release
 new_release "$rel" 'binary-v1'
 printf '0000000000000000000000000000000000000000000000000000000000000000  opus-linux-amd64\n' >"$rel/opus-linux-amd64.sha256"
-music=$tmp/music-checksum
-mkdir -p -- "$music"
-OPUS_ARCH=amd64 expect_fail run_at "$prefix" <<<"$music"
+OPUS_ARCH=amd64 expect_fail run_at "$prefix" </dev/null
 assert_absent "$prefix/usr/local/bin/opus"
 assert_absent "$prefix/etc/systemd/system/opus.service"
-# The music folder was already saved, so the retry must not ask again.
+# The conf was already written, so the retry keeps it.
 sha256sum -- "$rel/opus-linux-amd64" >"$rel/opus-linux-amd64.sha256"
 run_at "$prefix" </dev/null >"$tmp/retry.out"
 assert_file "$prefix/usr/local/bin/opus"
@@ -94,7 +92,7 @@ rel=$tmp/release
 music=$tmp/my\ music
 mkdir -p -- "$music"
 new_release "$rel" 'binary-v1'
-OPUS_ARCH=amd64 run_at "$prefix" <<<"$music" >"$tmp/install.out"
+OPUS_ARCH=amd64 run_at "$prefix" </dev/null >"$tmp/install.out"
 
 bin=$prefix/usr/local/bin/opus
 removed=$prefix/usr/local/bin/uninstall.sh
@@ -113,18 +111,18 @@ diff -q "$unit" "$root/deploy/opus.service" >/dev/null || fail "unit was not ins
 grep -q 'Restart=on-failure' "$unit" || fail "unit does not restart on failure"
 grep -q 'WantedBy=multi-user.target' "$unit" || fail "unit does not start at boot"
 grep -q 'AmbientCapabilities=CAP_NET_BIND_SERVICE' "$unit" || fail "unit cannot bind port 80"
-stored_root=$(awk -F= '/^music_root=/ { print substr($0, index($0, "=") + 1); exit }' "$conf")
-case $stored_root in
-  "$music" | "$(cd -- "$music" && pwd -P)") ;;
-  *) fail "music folder was not stored: $(cat "$conf")" ;;
-esac
+grep -q '^music_root=$' "$conf" || fail "shipped conf did not leave music_root empty"
 [ "$(grep -c '^music_root=' "$conf")" -eq 1 ] || fail "music_root was written more than once"
 if grep -q '^MUSIC_' "$conf"; then
   fail "config still uses environment assignments"
 fi
 conf_mode=$(stat -c %a "$conf" 2>/dev/null || stat -f %Lp "$conf")
 [ "$conf_mode" = 640 ] || fail "config mode is $conf_mode"
-grep -q 'enable --now opus' "$prefix/systemctl.log" || fail "service was not enabled"
+grep -q '^enable opus$' "$prefix/systemctl.log" || fail "service was not enabled"
+if grep -q 'enable --now' "$prefix/systemctl.log"; then
+  fail "new install started the service before the conf was edited"
+fi
+grep -q "Edit $conf, then: systemctl start opus" "$tmp/install.out" || fail "install did not tell the operator to edit the conf"
 grep -q 'Installing Opus for linux/amd64.' "$tmp/install.out" || fail "install did not report the architecture"
 
 # A second run sees the existing server and upgrades without asking again.
@@ -132,7 +130,9 @@ run_at "$prefix" </dev/null >"$tmp/second.out"
 grep -q 'Upgrading Opus for linux/amd64.' "$tmp/second.out" || fail "second run did not upgrade"
 cmp -s "$bin" "$rel/opus-linux-amd64" || fail "second run changed the binary"
 
-# Upgrade keeps edited values, adds a key from the new default, and replaces the binary.
+# Operator-edited values survive upgrade; new template keys are appended.
+sed -i.bak "s|^music_root=.*|music_root=$music|" "$conf"
+rm -f -- "$conf.bak"
 printf 'note=kept\n' >>"$conf"
 printf '# kept comment' >>"$conf"
 printf 'music_root=\nallowed_users=\n' >"$tmp/next.conf"
@@ -191,7 +191,7 @@ grep -q 'disable --now opus' "$prefix/systemctl.log" || fail "service was not di
 prefix=$tmp/purge
 rel=$tmp/release
 new_release "$rel" 'binary-v1'
-run_at "$prefix" <<<"$music" >/dev/null
+run_at "$prefix" </dev/null >/dev/null
 purge_bin=$prefix/usr/local/bin/opus
 purge_unit=$prefix/etc/systemd/system/opus.service
 purge_db=$prefix/var/lib/opus/inventory.db
@@ -216,7 +216,7 @@ grep -q 'Removed the service, the binary, the database, and the artwork cache.' 
 # A database path outside the data directory is refused before anything is removed.
 prefix=$tmp/unsafe
 new_release "$rel" 'binary-v1'
-run_at "$prefix" <<<"$music" >/dev/null
+run_at "$prefix" </dev/null >/dev/null
 unsafe_bin=$prefix/usr/local/bin/opus
 unsafe_unit=$prefix/etc/systemd/system/opus.service
 unsafe_cache=$prefix/var/lib/opus/inventory.db.artwork

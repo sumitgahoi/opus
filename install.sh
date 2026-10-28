@@ -15,15 +15,16 @@ usage() {
 Usage: install.sh [vX.Y.Z]
 
 Download the binary for this machine, install the systemd service, and
-start it. When Opus is already installed, replace the binary and the
+enable it. When Opus is already installed, replace the binary and the
 unit, and add config keys that are not set yet.
 
   vX.Y.Z   release tag; the default is the latest GitHub release
 
-The music folder is stored in /etc/opus/opus.conf.
-Uninstall with /usr/local/bin/uninstall.sh.
-Set OPUS_RELEASE_BASE to a directory or URL of release assets
-to install from somewhere other than GitHub.
+A new install writes /etc/opus/opus.conf and enables the service
+without starting it. Edit the conf, then start the service.
+Uninstall with /usr/local/bin/uninstall.sh. Set OPUS_RELEASE_BASE
+to a directory or URL of release assets to install from somewhere
+other than GitHub.
 EOF
 }
 
@@ -173,31 +174,6 @@ read_key() {
   return 1
 }
 
-set_key() {
-  local file=$1 key=$2 value=$3 tmp found=0 line name
-  case $value in
-    *$'\n'*) die "path contains a character the config file cannot store safely" ;;
-  esac
-  tmp=$(mktemp)
-  if [ -f "$file" ]; then
-    while IFS= read -r line || [ -n "$line" ]; do
-      name=$(key_name "$line" || true)
-      if [ "$name" = "$key" ]; then
-        if [ "$found" -eq 0 ]; then
-          printf '%s=%s\n' "$key" "$value" >>"$tmp"
-          found=1
-        fi
-        continue
-      fi
-      printf '%s\n' "$line" >>"$tmp"
-    done <"$file"
-  fi
-  if [ "$found" -eq 0 ]; then
-    printf '%s=%s\n' "$key" "$value" >>"$tmp"
-  fi
-  mv -- "$tmp" "$file"
-}
-
 conf_source() {
   local dir src
   if [ -n "${OPUS_CONF_FILE:-}" ]; then
@@ -290,42 +266,6 @@ ensure_user() {
   chown "$service:" "$state_dir"
 }
 
-ensure_readable() {
-  local music=$1
-  [ -d "$music" ] || die "music folder not found: $music"
-  if [ -n "$prefix" ]; then
-    return 0
-  fi
-  command -v runuser >/dev/null || die "runuser is required"
-  if runuser -u "$service" -- test -r "$music" && runuser -u "$service" -- test -x "$music"; then
-    return 0
-  fi
-  die "Opus cannot read ${music}. The service user needs read and search access on that folder and every directory above it."
-}
-
-prompt_music() {
-  local music resolved
-  printf 'Music folder: ' >&2
-  if ! IFS= read -r music; then
-    die "music folder is required"
-  fi
-  # A piped answer does not echo a newline after the prompt.
-  if [ ! -t 0 ]; then
-    printf '\n' >&2
-  fi
-  [ -n "$music" ] || die "music folder is required"
-  if resolved=$(realpath -e -- "$music" 2>/dev/null); then
-    :
-  elif resolved=$(realpath -- "$music" 2>/dev/null); then
-    :
-  else
-    die "music folder not found: $music"
-  fi
-  [ -d "$resolved" ] || die "$resolved is not a folder"
-  ensure_readable "$resolved"
-  printf '%s' "$resolved"
-}
-
 finish_config() {
   # BSD chmod does not accept --; paths here never start with -.
   chmod 640 "$conf_path"
@@ -335,20 +275,10 @@ finish_config() {
 }
 
 ensure_config() {
-  local ask=$1 existing music
   install -d -m 0755 -- "$conf_dir"
   if [ ! -f "$conf_path" ]; then
     copy_template "$conf_path"
-    finish_config
   fi
-  existing=$(read_key music_root "$conf_path" || true)
-  if [ "$ask" -eq 1 ] && [ -z "$existing" ]; then
-    music=$(prompt_music)
-    set_key "$conf_path" music_root "$music"
-    existing=$music
-  fi
-  [ -n "$existing" ] || die "music_root is not set in $conf_path"
-  ensure_readable "$existing"
   merge_template "$conf_path"
   finish_config
 }
@@ -412,9 +342,9 @@ already_installed() {
   [ -x "$bin_path" ] && [ -f "$conf_path" ]
 }
 
-start_service() {
+enable_service() {
   run_systemctl daemon-reload
-  run_systemctl enable --now "$service"
+  run_systemctl enable "$service"
 }
 
 restart_if_active() {
@@ -431,13 +361,13 @@ cmd_install() {
   require_arch
   printf 'Installing Opus for linux/%s.\n' "$arch"
   ensure_user
-  ensure_config 1
+  ensure_config
   install_binary "opus-linux-${arch}"
   install_unit
   install_uninstaller
-  start_service
+  enable_service
   printf 'Installed %s and enabled %s.\n' "$bin_path" "$service"
-  printf 'Music folder is in %s.\n' "$conf_path"
+  printf 'Edit %s, then: systemctl start %s\n' "$conf_path" "$service"
   printf 'Uninstall with %s.\n' "$uninstall_path"
 }
 
@@ -445,7 +375,7 @@ cmd_upgrade() {
   require_arch
   printf 'Upgrading Opus for linux/%s.\n' "$arch"
   ensure_user
-  ensure_config 0
+  ensure_config
   install_binary "opus-linux-${arch}"
   install_unit
   install_uninstaller

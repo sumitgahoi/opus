@@ -165,21 +165,24 @@ install.sh and run it. A checkout is not required. That script
 installs the server. When the binary and configuration are already
 present, the same script upgrades: it replaces the binary, the unit,
 and uninstall.sh, and appends config keys that are not set yet.
-- The systemd unit is enabled at boot and restarts on failure. The
-service runs as the opus user, which needs read access to
-the music folder.
+- The systemd unit is enabled at boot and restarts on failure once
+the operator has started it after editing the conf. The service
+runs as the opus user, which needs read access to the music folder.
 - uninstall.sh is installed next to the binary at
 /usr/local/bin/uninstall.sh. It removes the service and the binary.
 It asks whether to leave the database and artwork cache, or to
 remove those too. --keep-data and --purge make that choice without
 asking. The conf file and the music folder stay.
-- The server reads /etc/opus/opus.conf. The shipped
-default lists music_root. The installer asks for the music folder
-and writes it there. Later settings, including authorized_users,
-are added to this file. The database path and scan interval stay
-server defaults. The listen address defaults to 0.0.0.0:80. The
-systemd unit grants CAP_NET_BIND_SERVICE so the opus user can bind
-port 80. The database and the artwork cache live under /var/lib/opus.
+- The server reads /etc/opus/opus.conf. The installer ships the
+default conf, enables the systemd unit, and leaves the service
+stopped. It prints a note to edit the conf (music_root,
+authorized_users, and at least one of apple_client_ids or
+google_client_id), then start the service. An upgrade keeps existing
+values and appends keys that are not set yet. The database path and
+scan interval stay server defaults. The listen address defaults to
+0.0.0.0:80. The systemd unit grants CAP_NET_BIND_SERVICE so the
+opus user can bind port 80. The database and the artwork cache live
+under /var/lib/opus.
 
 ## Development strategy
 
