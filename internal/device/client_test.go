@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"music-server/internal/inventory"
+	"opus/internal/inventory"
 )
 
 type server struct {

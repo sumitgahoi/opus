@@ -570,7 +570,8 @@ func TestIgnoredFormatsAreLeftOut(t *testing.T) {
 		}
 	}
 	s := newStore(t)
-	apply(t, s, root, Observation{Path: "playlist.m3u", ContentID: "list", Size: 1})
+	// Empty root skips bindRoot so Scan can bind the symlink-resolved path.
+	apply(t, s, "", Observation{Path: "playlist.m3u", ContentID: "list", Size: 1})
 	if err := Scan(root, s); err != nil {
 		t.Fatal(err)
 	}

@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -14,7 +15,8 @@ import (
 	"strings"
 	"testing"
 
-	"music-server/internal/inventory"
+	"opus/internal/auth"
+	"opus/internal/inventory"
 )
 
 func TestHealth(t *testing.T) {
@@ -143,10 +145,47 @@ func openStore(t *testing.T) *inventory.Store {
 
 func serve(t *testing.T, root string, store *inventory.Store) (*httptest.Server, *Handler) {
 	t.Helper()
-	handler := New(root, store)
+	sessions := auth.NewSessions(store.DB())
+	svc := auth.New(sessions, auth.Config{
+		GoogleClientID: "test-google-client",
+		GoogleAllowedEmails: map[string]struct{}{
+			"ada@example.com": {},
+		},
+		AppleClientIDs: map[string]struct{}{"app.musicclient.ios": {}},
+		AppleAllowed: map[string]struct{}{
+			"ada@example.com": {},
+			"ada.sub":         {},
+		},
+	})
+	handler := New(root, store, svc)
 	ts := httptest.NewServer(handler.Routes())
 	t.Cleanup(ts.Close)
 	return ts, handler
+}
+
+func testAuth(t *testing.T, store *inventory.Store) *auth.Service {
+	t.Helper()
+	sessions := auth.NewSessions(store.DB())
+	return auth.New(sessions, auth.Config{
+		GoogleClientID: "test-google-client",
+		GoogleAllowedEmails: map[string]struct{}{
+			"ada@example.com": {},
+		},
+		AppleClientIDs: map[string]struct{}{"app.musicclient.ios": {}},
+		AppleAllowed: map[string]struct{}{
+			"ada@example.com": {},
+			"ada.sub":         {},
+		},
+	})
+}
+
+func bearer(t *testing.T, h *Handler, user string) string {
+	t.Helper()
+	token, _, err := h.Auth.Sessions.Create(user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
 }
 
 func getInventory(t *testing.T, url string) inventoryDocument {
@@ -194,7 +233,7 @@ func TestSnapshotWhileScanRuns(t *testing.T) {
 	if err := inventory.Scan(root, store); err != nil {
 		t.Fatal(err)
 	}
-	handler := New(root, store)
+	handler := New(root, store, testAuth(t, store))
 	started := make(chan struct{})
 	release := make(chan struct{})
 	handler.scan = func(string, *inventory.Store) error {
@@ -217,7 +256,7 @@ func TestSnapshotWhileScanRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set("X-User-Id", "ada")
+	req.Header.Set("Authorization", "Bearer "+bearer(t, handler, "ada"))
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -250,17 +289,15 @@ func TestDownloadSongByID(t *testing.T) {
 	if err := inventory.Scan(root, store); err != nil {
 		t.Fatal(err)
 	}
-	ts, _ := serve(t, root, store)
+	ts, handler := serve(t, root, store)
 	doc := getInventory(t, ts.URL+"/inventory.json")
 	if len(doc.Assets) != 1 {
 		t.Fatalf("assets = %d", len(doc.Assets))
 	}
 	id := doc.Assets[0].ID
+	token := bearer(t, handler, "ada")
 
-	res, err := http.Get(ts.URL + "/songs/" + id)
-	if err != nil {
-		t.Fatal(err)
-	}
+	res := getAuthed(t, ts.URL+"/songs/"+id, token)
 	defer res.Body.Close()
 	got, err := io.ReadAll(res.Body)
 	if err != nil {
@@ -283,10 +320,7 @@ func TestDownloadSongByID(t *testing.T) {
 		t.Fatal("response exposes the library path")
 	}
 
-	missing, err := http.Get(ts.URL + "/songs/no-such-song")
-	if err != nil {
-		t.Fatal(err)
-	}
+	missing := getAuthed(t, ts.URL+"/songs/no-such-song", token)
 	defer missing.Body.Close()
 	if missing.StatusCode != http.StatusNotFound {
 		t.Fatalf("missing status %s", missing.Status)
@@ -308,10 +342,7 @@ func TestDownloadSongByID(t *testing.T) {
 	if err := inventory.Scan(root, store); err != nil {
 		t.Fatal(err)
 	}
-	gone, err := http.Get(ts.URL + "/songs/" + id)
-	if err != nil {
-		t.Fatal(err)
-	}
+	gone := getAuthed(t, ts.URL+"/songs/"+id, token)
 	defer gone.Body.Close()
 	if gone.StatusCode != http.StatusNotFound {
 		t.Fatalf("gone status %s", gone.Status)
@@ -334,26 +365,18 @@ func TestSnapshotIsTheDeviceBootstrap(t *testing.T) {
 	if err := inventory.Scan(root, store); err != nil {
 		t.Fatal(err)
 	}
-	ts, _ := serve(t, root, store)
+	ts, handler := serve(t, root, store)
 
 	res, err := http.Get(ts.URL + "/snapshot.json")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer res.Body.Close()
-	if res.StatusCode != http.StatusBadRequest {
+	if res.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status %s", res.Status)
 	}
 
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/snapshot.json", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("X-User-Id", "ada")
-	res, err = http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
+	res = getAuthed(t, ts.URL+"/snapshot.json", bearer(t, handler, "ada"))
 	defer res.Body.Close()
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
@@ -392,19 +415,12 @@ func TestArtworkByHash(t *testing.T) {
 	if err := inventory.Scan(root, store); err != nil {
 		t.Fatal(err)
 	}
-	ts, _ := serve(t, root, store)
+	ts, handler := serve(t, root, store)
 	sum := sha256.Sum256(picture)
 	hash := hex.EncodeToString(sum[:])
+	token := bearer(t, handler, "ada")
 
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/snapshot.json", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("X-User-Id", "ada")
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
+	res := getAuthed(t, ts.URL+"/snapshot.json", token)
 	defer res.Body.Close()
 	raw, err := io.ReadAll(res.Body)
 	if err != nil {
@@ -420,10 +436,7 @@ func TestArtworkByHash(t *testing.T) {
 		t.Fatalf("snapshot includes a path or the image: %s", raw)
 	}
 
-	res, err = http.Get(ts.URL + "/artwork/" + hash)
-	if err != nil {
-		t.Fatal(err)
-	}
+	res = getAuthed(t, ts.URL+"/artwork/"+hash, token)
 	defer res.Body.Close()
 	got, err := io.ReadAll(res.Body)
 	if err != nil {
@@ -446,6 +459,7 @@ func TestArtworkByHash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cond.Header.Set("Authorization", "Bearer "+token)
 	cond.Header.Set("If-None-Match", `"`+hash+`"`)
 	res, err = http.DefaultClient.Do(cond)
 	if err != nil {
@@ -456,10 +470,7 @@ func TestArtworkByHash(t *testing.T) {
 		t.Fatalf("status %s", res.Status)
 	}
 
-	missing, err := http.Get(ts.URL + "/artwork/nope")
-	if err != nil {
-		t.Fatal(err)
-	}
+	missing := getAuthed(t, ts.URL+"/artwork/nope", token)
 	defer missing.Body.Close()
 	if missing.StatusCode != http.StatusNotFound {
 		t.Fatalf("status %s", missing.Status)
@@ -533,10 +544,11 @@ func TestActionLogUsesTheHeaderUser(t *testing.T) {
 	if err := inventory.Scan(root, store); err != nil {
 		t.Fatal(err)
 	}
-	ts, _ := serve(t, root, store)
-	cat := getSnapshot(t, ts.URL, "ada")
+	ts, handler := serve(t, root, store)
+	token := bearer(t, handler, "ada")
+	cat := getSnapshot(t, handler, ts.URL, token)
 	body := []byte(`{"actionId":"play-1","userId":"bea","songId":"` + cat.Songs[0].ID + `","type":"play","payload":{"userId":"bea","listenedMs":30001}}`)
-	res := postJSON(t, ts.URL+"/actions", "ada", "phone", body)
+	res := postJSON(t, ts.URL+"/actions", "phone", token, body)
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status %s", res.Status)
 	}
@@ -547,7 +559,7 @@ func TestActionLogUsesTheHeaderUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	res.Body.Close()
-	again := postJSON(t, ts.URL+"/actions", "ada", "phone", body)
+	again := postJSON(t, ts.URL+"/actions", "phone", token, body)
 	var ack2 struct {
 		Seq int64 `json:"seq"`
 	}
@@ -559,20 +571,12 @@ func TestActionLogUsesTheHeaderUser(t *testing.T) {
 		t.Fatalf("retry status %s seq %d want %d", again.Status, ack2.Seq, ack.Seq)
 	}
 	changed := bytes.Replace(body, []byte(`"listenedMs":30001`), []byte(`"listenedMs":40000`), 1)
-	conflict := postJSON(t, ts.URL+"/actions", "ada", "phone", changed)
+	conflict := postJSON(t, ts.URL+"/actions", "phone", token, changed)
 	conflict.Body.Close()
 	if conflict.StatusCode != http.StatusConflict {
 		t.Fatalf("conflict status %s", conflict.Status)
 	}
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/actions?since=0", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("X-User-Id", "ada")
-	got, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
+	got := getAuthed(t, ts.URL+"/actions?since=0", token)
 	defer got.Body.Close()
 	var page struct {
 		Actions []inventory.Action `json:"actions"`
@@ -596,33 +600,114 @@ func TestActionLogUsesTheHeaderUser(t *testing.T) {
 	if string(bea.Songs[0].Analytics) != "{}" {
 		t.Fatalf("bea analytics = %s", bea.Songs[0].Analytics)
 	}
-	ahead, err := http.NewRequest(http.MethodGet, ts.URL+"/actions?since=999999", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ahead.Header.Set("X-User-Id", "ada")
-	res, err = http.DefaultClient.Do(ahead)
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	if res.StatusCode != http.StatusConflict {
-		t.Fatalf("ahead status %s", res.Status)
+	ahead := getAuthed(t, ts.URL+"/actions?since=999999", token)
+	ahead.Body.Close()
+	if ahead.StatusCode != http.StatusConflict {
+		t.Fatalf("ahead status %s", ahead.Status)
 	}
 }
 
-func getSnapshot(t *testing.T, base, user string) inventory.Catalog {
-	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, base+"/snapshot.json", nil)
+func TestAuthGoogleAndApple(t *testing.T) {
+	store := openStore(t)
+	ts, handler := serve(t, t.TempDir(), store)
+
+	handler.Auth.SetGoogleVerifier(func(ctx context.Context, idToken string) (string, error) {
+		if idToken != "good-google" {
+			return "", auth.ErrInvalidToken
+		}
+		return "ada@example.com", nil
+	})
+	handler.Auth.SetAppleVerifier(func(ctx context.Context, idToken string) (string, error) {
+		if idToken == "blocked" {
+			return "", auth.ErrNotAllowlisted
+		}
+		if idToken != "good-apple" {
+			return "", auth.ErrInvalidToken
+		}
+		return "ada@example.com", nil
+	})
+
+	bad := postAuth(t, ts.URL+"/auth/google", `{"idToken":"nope"}`)
+	bad.Body.Close()
+	if bad.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("bad google status %s", bad.Status)
+	}
+	blocked := postAuth(t, ts.URL+"/auth/apple", `{"idToken":"blocked"}`)
+	blocked.Body.Close()
+	if blocked.StatusCode != http.StatusForbidden {
+		t.Fatalf("blocked apple status %s", blocked.Status)
+	}
+
+	ok := postAuth(t, ts.URL+"/auth/google", `{"idToken":"good-google"}`)
+	defer ok.Body.Close()
+	if ok.StatusCode != http.StatusOK {
+		t.Fatalf("google status %s", ok.Status)
+	}
+	var session authSessionDocument
+	if err := json.NewDecoder(ok.Body).Decode(&session); err != nil {
+		t.Fatal(err)
+	}
+	if session.UserID != "ada@example.com" || session.Token == "" {
+		t.Fatalf("session = %+v", session)
+	}
+	snap := getAuthed(t, ts.URL+"/snapshot.json", session.Token)
+	snap.Body.Close()
+	if snap.StatusCode != http.StatusOK {
+		t.Fatalf("snapshot status %s", snap.Status)
+	}
+	stray, err := http.NewRequest(http.MethodGet, ts.URL+"/snapshot.json", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set("X-User-Id", user)
+	stray.Header.Set("Authorization", "Bearer "+session.Token)
+	stray.Header.Set("X-User-Id", "other")
+	ignoredHeader, err := http.DefaultClient.Do(stray)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ignoredHeader.Body.Close()
+	if ignoredHeader.StatusCode != http.StatusOK {
+		t.Fatalf("stray user header status %s", ignoredHeader.Status)
+	}
+
+	apple := postAuth(t, ts.URL+"/auth/apple", `{"idToken":"good-apple"}`)
+	apple.Body.Close()
+	if apple.StatusCode != http.StatusOK {
+		t.Fatalf("apple status %s", apple.Status)
+	}
+}
+
+func postAuth(t *testing.T, url, body string) *http.Response {
+	t.Helper()
+	res, err := http.Post(url, "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
+
+func getAuthed(t *testing.T, url, token string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return res
+}
+
+func getSnapshot(t *testing.T, h *Handler, base, token string) inventory.Catalog {
+	t.Helper()
+	res := getAuthed(t, base+"/snapshot.json", token)
 	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+		t.Fatalf("status %s: %s", res.Status, body)
+	}
 	var cat inventory.Catalog
 	if err := json.NewDecoder(res.Body).Decode(&cat); err != nil {
 		t.Fatal(err)
@@ -630,13 +715,13 @@ func getSnapshot(t *testing.T, base, user string) inventory.Catalog {
 	return cat
 }
 
-func postJSON(t *testing.T, url, user, device string, body []byte) *http.Response {
+func postJSON(t *testing.T, url, device, token string, body []byte) *http.Response {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set("X-User-Id", user)
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("X-Device-Id", device)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {

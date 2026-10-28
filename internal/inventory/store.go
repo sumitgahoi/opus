@@ -141,6 +141,11 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// DB is the open SQLite handle. Auth sessions use the same file.
+func (s *Store) DB() *sql.DB {
+	return s.db
+}
+
 // Ping reports whether the inventory database answers.
 func (s *Store) Ping() error {
 	return s.db.Ping()
@@ -236,6 +241,14 @@ CREATE TABLE IF NOT EXISTS liked (
 	song_id TEXT NOT NULL REFERENCES assets(id),
 	UNIQUE (user_id, song_id)
 );
+
+CREATE TABLE IF NOT EXISTS sessions (
+	token         TEXT PRIMARY KEY,
+	user_id       TEXT NOT NULL,
+	expires_at_ms INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS sessions_expires ON sessions(expires_at_ms);
 `
 
 type assetRec struct {

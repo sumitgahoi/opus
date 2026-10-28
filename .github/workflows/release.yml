@@ -35,11 +35,11 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           mkdir -p dist
-          go build -trimpath -ldflags "-s -w" -o "dist/music-server-linux-${GOARCH}" ./cmd/server
-          sha256sum "dist/music-server-linux-${GOARCH}" > "dist/music-server-linux-${GOARCH}.sha256"
+          go build -trimpath -ldflags "-s -w" -o "dist/opus-linux-${GOARCH}" ./cmd/server
+          sha256sum "dist/opus-linux-${GOARCH}" > "dist/opus-linux-${GOARCH}.sha256"
       - uses: actions/upload-artifact@v4
         with:
-          name: music-server-linux-${{ matrix.goarch }}
+          name: opus-linux-${{ matrix.goarch }}
           path: dist/*
 
   release:
@@ -56,15 +56,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp install.sh uninstall.sh deploy/music-server.service deploy/music-server.conf dist/
+          cp install.sh uninstall.sh deploy/opus.service deploy/opus.conf dist/
           cd dist
           files=(
-            music-server-linux-amd64
-            music-server-linux-amd64.sha256
-            music-server-linux-arm64
-            music-server-linux-arm64.sha256
-            music-server.service
-            music-server.conf
+            opus-linux-amd64
+            opus-linux-amd64.sha256
+            opus-linux-arm64
+            opus-linux-arm64.sha256
+            opus.service
+            opus.conf
             install.sh
             uninstall.sh
           )

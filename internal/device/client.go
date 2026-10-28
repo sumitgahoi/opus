@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"music-server/internal/inventory"
+	"opus/internal/inventory"
 
 	_ "modernc.org/sqlite"
 )

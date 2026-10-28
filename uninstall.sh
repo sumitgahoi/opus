@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Remove the music-server service and binary. Optionally remove its database and artwork.
+# Remove the Opus service and binary. Optionally remove its database and artwork.
 set -euo pipefail
 
-service=music-server
-default_db=/var/lib/music-server/inventory.db
+service=opus
+default_db=/var/lib/opus/inventory.db
 
 die() {
   printf '%s\n' "$*" >&2
@@ -24,14 +24,14 @@ EOF
 
 init_paths() {
   prefix=
-  if [ "${MUSIC_SERVER_TEST:-}" = 1 ]; then
-    [ -n "${MUSIC_SERVER_PREFIX:-}" ] || die "test mode requires MUSIC_SERVER_PREFIX"
-    prefix=${MUSIC_SERVER_PREFIX%/}
+  if [ "${OPUS_TEST:-}" = 1 ]; then
+    [ -n "${OPUS_PREFIX:-}" ] || die "test mode requires OPUS_PREFIX"
+    prefix=${OPUS_PREFIX%/}
   fi
-  bin_path=$prefix/usr/local/bin/music-server
+  bin_path=$prefix/usr/local/bin/opus
   uninstall_path=$prefix/usr/local/bin/uninstall.sh
-  unit_path=$prefix/etc/systemd/system/music-server.service
-  conf_path=$prefix/etc/music-server/music-server.conf
+  unit_path=$prefix/etc/systemd/system/opus.service
+  conf_path=$prefix/etc/opus/opus.conf
 }
 
 prefixed() {
@@ -39,6 +39,9 @@ prefixed() {
 }
 
 require_linux() {
+  if [ "${OPUS_TEST:-}" = 1 ]; then
+    return 0
+  fi
   [ "$(uname -s)" = Linux ] || die "this uninstaller supports Linux"
 }
 
@@ -97,7 +100,7 @@ safe_db() {
   local db=$1 music=$2
   db=${db%/}
   case $db in
-    /var/lib/music-server/*) ;;
+    /var/lib/opus/*) ;;
     *) return 1 ;;
   esac
   case $db in
@@ -119,7 +122,7 @@ safe_cache() {
   db=${db%/}
   cache=${db}.artwork
   case $cache in
-    /var/lib/music-server/*.artwork) ;;
+    /var/lib/opus/*.artwork) ;;
     *) return 1 ;;
   esac
   case $cache in

@@ -1,4 +1,4 @@
-module music-server
+module opus
 
 go 1.26.0
 

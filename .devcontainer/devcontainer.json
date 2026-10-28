@@ -1,7 +1,7 @@
 {
-  "name": "music-server",
+  "name": "opus",
   "image": "mcr.microsoft.com/devcontainers/go:1.27-trixie",
-  "forwardPorts": [8080],
+  "forwardPorts": [80],
   "customizations": {
     "vscode": {
       "extensions": ["golang.go"]

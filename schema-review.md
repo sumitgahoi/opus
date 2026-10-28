@@ -4,7 +4,7 @@ Written before production. The system is not deployed yet, so schema and
 protocol can still change in place. After launch, the action log and
 derived tables become hard to revise.
 
-Scope: `music-server`, `music-client`, `music-web`. The live schema is
+Scope: Opus (`music-server`), Hush (`music-client`), `music-web`. The live schema is
 `internal/inventory/store.go`. Product rules are REQUIREMENTS.md.
 `database.md` was deleted; it had drifted from the code.
 

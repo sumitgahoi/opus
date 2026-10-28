@@ -9,8 +9,9 @@ import (
 	"os"
 	"time"
 
-	"music-server/internal/inventory"
-	"music-server/internal/web"
+	"opus/internal/auth"
+	"opus/internal/inventory"
+	"opus/internal/web"
 )
 
 func main() {
@@ -28,14 +29,14 @@ func run() error {
 	configFlag := flag.String("config", "", "configuration file")
 	rootFlag := flag.String("root", "", "music folder to inventory")
 	dbFlag := flag.String("db", "inventory.db", "SQLite inventory database")
-	addr := flag.String("addr", "0.0.0.0:8080", "listen address")
+	addr := flag.String("addr", "0.0.0.0:80", "listen address")
 	scanInterval := flag.Duration("scan-interval", 15*time.Minute, "rescan period; 0 disables the timer")
 	flag.Parse()
-	rootValue, err := resolveRoot(*configFlag, *rootFlag)
+	cfg, err := resolveConfig(*configFlag, *rootFlag)
 	if err != nil {
 		return err
 	}
-	root, err := inventory.CleanRoot(rootValue)
+	root, err := inventory.CleanRoot(cfg.MusicRoot)
 	if err != nil {
 		return err
 	}
@@ -45,7 +46,19 @@ func run() error {
 	}
 	defer store.Close()
 
-	handler := web.New(root, store)
+	var authSvc *auth.Service
+	if *configFlag != "" {
+		sessions := auth.NewSessions(store.DB())
+		if err := sessions.EnsureSchema(); err != nil {
+			return err
+		}
+		authSvc = auth.New(sessions, cfg.Auth)
+		if !authSvc.Enabled() {
+			return errors.New("sign-in is not configured")
+		}
+	}
+
+	handler := web.New(root, store, authSvc)
 	handler.Start(*scanInterval)
 	server := &http.Server{
 		Addr:              *addr,

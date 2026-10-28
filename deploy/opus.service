@@ -1,0 +1,26 @@
+[Unit]
+Description=Opus
+After=network.target
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=opus
+Group=opus
+ExecStart=/usr/local/bin/opus -config /etc/opus/opus.conf
+Restart=on-failure
+RestartSec=5s
+StateDirectory=opus
+WorkingDirectory=/var/lib/opus
+UMask=0077
+NoNewPrivileges=true
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/opus
+
+[Install]
+WantedBy=multi-user.target

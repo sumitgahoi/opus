@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Install, upgrade, or remove the music-server systemd service.
+# Install, upgrade, or remove the Opus systemd service.
 set -euo pipefail
 
-repo=${MUSIC_SERVER_REPO:-sumitgahoi/music-server}
-service=music-server
+repo=${OPUS_REPO:-sumitgahoi/music-server}
+service=opus
 
 die() {
   printf '%s\n' "$*" >&2
@@ -15,30 +15,30 @@ usage() {
 Usage: install.sh [vX.Y.Z]
 
 Download the binary for this machine, install the systemd service, and
-start it. When music-server is already installed, replace the binary
-and the unit, and add config keys that are not set yet.
+start it. When Opus is already installed, replace the binary and the
+unit, and add config keys that are not set yet.
 
   vX.Y.Z   release tag; the default is the latest GitHub release
 
-The music folder is stored in /etc/music-server/music-server.conf.
+The music folder is stored in /etc/opus/opus.conf.
 Uninstall with /usr/local/bin/uninstall.sh.
-Set MUSIC_SERVER_RELEASE_BASE to a directory or URL of release assets
+Set OPUS_RELEASE_BASE to a directory or URL of release assets
 to install from somewhere other than GitHub.
 EOF
 }
 
 init_paths() {
   prefix=
-  if [ "${MUSIC_SERVER_TEST:-}" = 1 ]; then
-    [ -n "${MUSIC_SERVER_PREFIX:-}" ] || die "test mode requires MUSIC_SERVER_PREFIX"
-    prefix=${MUSIC_SERVER_PREFIX%/}
+  if [ "${OPUS_TEST:-}" = 1 ]; then
+    [ -n "${OPUS_PREFIX:-}" ] || die "test mode requires OPUS_PREFIX"
+    prefix=${OPUS_PREFIX%/}
   fi
-  bin_path=$prefix/usr/local/bin/music-server
+  bin_path=$prefix/usr/local/bin/opus
   uninstall_path=$prefix/usr/local/bin/uninstall.sh
-  unit_path=$prefix/etc/systemd/system/music-server.service
-  conf_dir=$prefix/etc/music-server
-  conf_path=$conf_dir/music-server.conf
-  state_dir=$prefix/var/lib/music-server
+  unit_path=$prefix/etc/systemd/system/opus.service
+  conf_dir=$prefix/etc/opus
+  conf_path=$conf_dir/opus.conf
+  state_dir=$prefix/var/lib/opus
 }
 
 prefixed() {
@@ -46,13 +46,16 @@ prefixed() {
 }
 
 require_linux() {
+  if [ "${OPUS_TEST:-}" = 1 ]; then
+    return 0
+  fi
   [ "$(uname -s)" = Linux ] || die "this installer supports Linux"
 }
 
 machine_arch() {
   local raw
-  if [ "${MUSIC_SERVER_TEST:-}" = 1 ] && [ -n "${MUSIC_SERVER_ARCH:-}" ]; then
-    raw=$MUSIC_SERVER_ARCH
+  if [ "${OPUS_TEST:-}" = 1 ] && [ -n "${OPUS_ARCH:-}" ]; then
+    raw=$OPUS_ARCH
   else
     raw=$(uname -m)
   fi
@@ -94,7 +97,7 @@ service_active() {
 }
 
 release_base() {
-  local base=${MUSIC_SERVER_RELEASE_BASE:-}
+  local base=${OPUS_RELEASE_BASE:-}
   if [ -z "$base" ]; then
     if [ -n "$version" ]; then
       base="https://github.com/${repo}/releases/download/${version}"
@@ -119,7 +122,7 @@ fetch() {
       cp -- "$src" "$dest"
       ;;
     *)
-      if [ "${MUSIC_SERVER_TEST:-}" = 1 ]; then
+      if [ "${OPUS_TEST:-}" = 1 ]; then
         die "test mode tried to download $url"
       fi
       command -v curl >/dev/null || die "curl is required to download the release"
@@ -197,12 +200,12 @@ set_key() {
 
 conf_source() {
   local dir src
-  if [ -n "${MUSIC_SERVER_CONF_FILE:-}" ]; then
-    printf '%s' "$MUSIC_SERVER_CONF_FILE"
+  if [ -n "${OPUS_CONF_FILE:-}" ]; then
+    printf '%s' "$OPUS_CONF_FILE"
     return 0
   fi
   dir=$(script_dir)
-  for src in "$dir/deploy/music-server.conf" "$dir/music-server.conf"; do
+  for src in "$dir/deploy/opus.conf" "$dir/opus.conf"; do
     if [ -f "$src" ]; then
       printf '%s' "$src"
       return 0
@@ -218,7 +221,7 @@ copy_template() {
     cp -- "$src" "$dest"
     return 0
   fi
-  fetch "$(asset_url music-server.conf)" "$dest"
+  fetch "$(asset_url opus.conf)" "$dest"
 }
 
 merge_template() {
@@ -246,12 +249,12 @@ script_dir() {
 
 unit_source() {
   local dir src
-  if [ -n "${MUSIC_SERVER_UNIT_FILE:-}" ]; then
-    printf '%s' "$MUSIC_SERVER_UNIT_FILE"
+  if [ -n "${OPUS_UNIT_FILE:-}" ]; then
+    printf '%s' "$OPUS_UNIT_FILE"
     return 0
   fi
   dir=$(script_dir)
-  for src in "$dir/deploy/music-server.service" "$dir/music-server.service"; do
+  for src in "$dir/deploy/opus.service" "$dir/opus.service"; do
     if [ -f "$src" ]; then
       printf '%s' "$src"
       return 0
@@ -262,8 +265,8 @@ unit_source() {
 
 uninstaller_source() {
   local dir src
-  if [ -n "${MUSIC_SERVER_UNINSTALL_FILE:-}" ]; then
-    printf '%s' "$MUSIC_SERVER_UNINSTALL_FILE"
+  if [ -n "${OPUS_UNINSTALL_FILE:-}" ]; then
+    printf '%s' "$OPUS_UNINSTALL_FILE"
     return 0
   fi
   dir=$(script_dir)
@@ -282,9 +285,9 @@ ensure_user() {
   fi
   if ! getent passwd "$service" >/dev/null; then
     command -v useradd >/dev/null || die "useradd is required"
-    useradd --system --user-group --home-dir /var/lib/music-server --shell /usr/sbin/nologin "$service"
+    useradd --system --user-group --home-dir /var/lib/opus --shell /usr/sbin/nologin "$service"
   fi
-  chown "$service:" -- "$state_dir"
+  chown "$service:" "$state_dir"
 }
 
 ensure_readable() {
@@ -297,7 +300,7 @@ ensure_readable() {
   if runuser -u "$service" -- test -r "$music" && runuser -u "$service" -- test -x "$music"; then
     return 0
   fi
-  die "music-server cannot read ${music}. The service user needs read and search access on that folder and every directory above it."
+  die "Opus cannot read ${music}. The service user needs read and search access on that folder and every directory above it."
 }
 
 prompt_music() {
@@ -311,16 +314,23 @@ prompt_music() {
     printf '\n' >&2
   fi
   [ -n "$music" ] || die "music folder is required"
-  resolved=$(realpath -e -- "$music") || die "music folder not found: $music"
+  if resolved=$(realpath -e -- "$music" 2>/dev/null); then
+    :
+  elif resolved=$(realpath -- "$music" 2>/dev/null); then
+    :
+  else
+    die "music folder not found: $music"
+  fi
   [ -d "$resolved" ] || die "$resolved is not a folder"
   ensure_readable "$resolved"
   printf '%s' "$resolved"
 }
 
 finish_config() {
-  chmod 640 -- "$conf_path"
+  # BSD chmod does not accept --; paths here never start with -.
+  chmod 640 "$conf_path"
   if [ -z "$prefix" ]; then
-    chown "root:$service" -- "$conf_path"
+    chown "root:$service" "$conf_path"
   fi
 }
 
@@ -345,12 +355,12 @@ ensure_config() {
 
 install_binary() {
   local name=$1 work bin sum
-  if [ "${MUSIC_SERVER_TEST:-}" = 1 ] && [ -z "${MUSIC_SERVER_RELEASE_BASE:-}" ]; then
-    die "test mode requires MUSIC_SERVER_RELEASE_BASE"
+  if [ "${OPUS_TEST:-}" = 1 ] && [ -z "${OPUS_RELEASE_BASE:-}" ]; then
+    die "test mode requires OPUS_RELEASE_BASE"
   fi
   work=$(mktemp -d)
-  bin=$work/music-server
-  sum=$work/music-server.sha256
+  bin=$work/opus
+  sum=$work/opus.sha256
   # The subshell keeps a failing download from skipping this cleanup.
   if (
     fetch "$(asset_url "$name")" "$bin" &&
@@ -372,7 +382,7 @@ install_unit() {
     :
   else
     tmp=$(mktemp)
-    fetch "$(asset_url music-server.service)" "$tmp"
+    fetch "$(asset_url opus.service)" "$tmp"
     src=$tmp
   fi
   install -d -m 0755 -- "$(dirname -- "$unit_path")"
@@ -419,10 +429,10 @@ restart_if_active() {
 
 cmd_install() {
   require_arch
-  printf 'Installing music-server for linux/%s.\n' "$arch"
+  printf 'Installing Opus for linux/%s.\n' "$arch"
   ensure_user
   ensure_config 1
-  install_binary "music-server-linux-${arch}"
+  install_binary "opus-linux-${arch}"
   install_unit
   install_uninstaller
   start_service
@@ -433,10 +443,10 @@ cmd_install() {
 
 cmd_upgrade() {
   require_arch
-  printf 'Upgrading music-server for linux/%s.\n' "$arch"
+  printf 'Upgrading Opus for linux/%s.\n' "$arch"
   ensure_user
   ensure_config 0
-  install_binary "music-server-linux-${arch}"
+  install_binary "opus-linux-${arch}"
   install_unit
   install_uninstaller
   restart_if_active
@@ -445,7 +455,7 @@ cmd_upgrade() {
 
 main() {
   local arg
-  version=${MUSIC_SERVER_VERSION:-}
+  version=${OPUS_VERSION:-}
   while [ "$#" -gt 0 ]; do
     arg=$1
     shift

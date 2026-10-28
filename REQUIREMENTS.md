@@ -2,12 +2,11 @@
 
 ## Purpose
 
-Build a personal music server in Go with SQLite. Reliability,
-simplicity, and maintainability matter more than features.
+Build Opus, a personal music library server in Go with SQLite.
+Reliability, simplicity, and maintainability matter more than features.
 
 Clients read the catalog, send user actions, and keep their own
-playback, offline caches, and search indexes. Those are not this
-server's job.
+playback, offline caches, and search indexes. Those are not Opus's job.
 
 ## Scale
 
@@ -114,13 +113,25 @@ exists.
 
 ### Authentication
 
-- Google OAuth 2 is the only sign-in.
-- A configuration file lists the Google accounts that may use the
-server. A signed-in account that is not on the list is refused.
-- The accepted Google account is the user id. A user id in an action
-body is not that binding.
-- The Google client credentials are separate from the allowlist and
-are not written to logs.
+- Sign-in is Apple and/or Google identity tokens. The iPhone app uses
+Apple only. The web controller may use either. Configure one or both
+providers in the server config.
+- `POST /auth/apple` and `POST /auth/google` accept `{"idToken"}`.
+Success is `{"userId","token","expiresAt"}`. A verified account that
+is not on the allowlist is `403`. A bad token is `401`.
+- `POST /auth/dev` accepts `{"userId"}` when config `dev_auth=true`.
+It issues a session only for an allowlisted user id (Google email or
+Apple allowlist entry). Use it for temporary phone login until Sign
+in with Apple is provisioned; keep it off in production.
+- Library routes (`/snapshot.json`, `/actions`, `/songs/{id}`,
+`/artwork/{hash}`) require `Authorization: Bearer <token>`. The
+session user is the binding. A user id in an action body is not that
+binding. `X-User-Id` is not an identity.
+- Google: the allowlisted email (lowercased) is the user id.
+Apple: the allowlisted email when present, otherwise the Apple
+subject id. Allowlists accept emails and Apple subject ids.
+- Client ids and allowlists are configuration. Tokens and secrets are
+not written to logs.
 
 ### Synchronization and recovery
 
@@ -158,19 +169,20 @@ installs the server. When the binary and configuration are already
 present, the same script upgrades: it replaces the binary, the unit,
 and uninstall.sh, and appends config keys that are not set yet.
 - The systemd unit is enabled at boot and restarts on failure. The
-service runs as the music-server user, which needs read access to
+service runs as the opus user, which needs read access to
 the music folder.
 - uninstall.sh is installed next to the binary at
 /usr/local/bin/uninstall.sh. It removes the service and the binary.
 It asks whether to leave the database and artwork cache, or to
 remove those too. --keep-data and --purge make that choice without
 asking. The conf file and the music folder stay.
-- The server reads /etc/music-server/music-server.conf. The shipped
+- The server reads /etc/opus/opus.conf. The shipped
 default lists music_root. The installer asks for the music folder
 and writes it there. Later settings, including the account allowlist,
-are added to this file. The database path, listen address, and scan
-interval stay server defaults. The database and the artwork cache
-live under /var/lib/music-server.
+are added to this file. The database path and scan interval stay
+server defaults. The listen address defaults to 0.0.0.0:80. The
+systemd unit grants CAP_NET_BIND_SERVICE so the opus user can bind
+port 80. The database and the artwork cache live under /var/lib/opus.
 
 ## Development strategy
 
@@ -232,8 +244,8 @@ writes, then catches up from the action log.
 
 - Accept play, finish, and skip with the definitions above. A retry
 of the same action id does not apply twice.
-- Sign-in is Google OAuth 2, and the allowlist file is the only list
-of users.
+- Sign-in is Apple and/or Google identity tokens with config
+allowlists. Library routes require a bearer session.
 - A GitHub release produces the server binary.
 - systemd runs the server on the Debian host.
 

@@ -323,7 +323,7 @@ func (c *storeCatalog) get(raw string, limit int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "music-server")
+	req.Header.Set("User-Agent", "opus")
 	res, err := c.client.Do(req)
 	if err != nil {
 		return nil, err

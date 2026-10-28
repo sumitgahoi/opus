@@ -15,13 +15,15 @@ import (
 	"sync"
 	"time"
 
-	"music-server/internal/inventory"
+	"opus/internal/auth"
+	"opus/internal/inventory"
 )
 
 // Handler serves the inventory as JSON.
 type Handler struct {
 	Root  string
 	Store *inventory.Store
+	Auth  *auth.Service
 
 	scan func(root string, store *inventory.Store) error
 
@@ -31,9 +33,10 @@ type Handler struct {
 	scanErr  error
 }
 
-// New prepares the JSON inventory handler.
-func New(root string, store *inventory.Store) *Handler {
-	return &Handler{Root: root, Store: store, scan: inventory.Scan}
+// New prepares the JSON inventory handler. Auth may be nil only for
+// local -root inventory work; phone and library routes then refuse access.
+func New(root string, store *inventory.Store, authSvc *auth.Service) *Handler {
+	return &Handler{Root: root, Store: store, Auth: authSvc, scan: inventory.Scan}
 }
 
 // Start begins an immediate library scan. A positive interval scans
@@ -58,6 +61,9 @@ func (h *Handler) Start(interval time.Duration) {
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", h.health)
+	mux.HandleFunc("POST /auth/google", h.authGoogle)
+	mux.HandleFunc("POST /auth/apple", h.authApple)
+	mux.HandleFunc("POST /auth/dev", h.authDev)
 	mux.HandleFunc("GET /inventory.json", h.inventory)
 	mux.HandleFunc("GET /snapshot.json", h.snapshot)
 	mux.HandleFunc("GET /songs/{id}", h.song)
@@ -86,7 +92,89 @@ func (h *Handler) inventory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, doc)
 }
 
+func (h *Handler) authGoogle(w http.ResponseWriter, r *http.Request) {
+	h.signIn(w, r, func(idToken string) (string, string, time.Time, error) {
+		return h.Auth.SignInGoogle(r.Context(), idToken)
+	})
+}
+
+func (h *Handler) authApple(w http.ResponseWriter, r *http.Request) {
+	h.signIn(w, r, func(idToken string) (string, string, time.Time, error) {
+		return h.Auth.SignInApple(r.Context(), idToken)
+	})
+}
+
+func (h *Handler) authDev(w http.ResponseWriter, r *http.Request) {
+	if h.Auth == nil {
+		writeError(w, http.StatusServiceUnavailable, "sign-in is not configured")
+		return
+	}
+	var body struct {
+		UserID string `json:"userId"`
+	}
+	dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+	if err := dec.Decode(&body); err != nil || strings.TrimSpace(body.UserID) == "" {
+		writeError(w, http.StatusBadRequest, "user id is required")
+		return
+	}
+	userID, token, expiresAt, err := h.Auth.SignInDev(body.UserID)
+	switch {
+	case errors.Is(err, auth.ErrProviderDisabled):
+		writeError(w, http.StatusServiceUnavailable, "dev sign-in is not enabled")
+	case errors.Is(err, auth.ErrNotAllowlisted):
+		writeError(w, http.StatusForbidden, "account not allowed")
+	case errors.Is(err, auth.ErrInvalidToken):
+		writeError(w, http.StatusBadRequest, "user id is required")
+	case err != nil:
+		log.Printf("auth: %v", err)
+		writeError(w, http.StatusInternalServerError, "sign-in failed")
+	default:
+		writeJSON(w, http.StatusOK, authSessionDocument{
+			UserID:    userID,
+			Token:     token,
+			ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
+		})
+	}
+}
+
+func (h *Handler) signIn(w http.ResponseWriter, r *http.Request, fn func(idToken string) (string, string, time.Time, error)) {
+	if h.Auth == nil {
+		writeError(w, http.StatusServiceUnavailable, "sign-in is not configured")
+		return
+	}
+	var body struct {
+		IDToken string `json:"idToken"`
+	}
+	dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+	if err := dec.Decode(&body); err != nil || strings.TrimSpace(body.IDToken) == "" {
+		writeError(w, http.StatusBadRequest, "invalid token")
+		return
+	}
+	userID, token, expiresAt, err := fn(strings.TrimSpace(body.IDToken))
+	switch {
+	case errors.Is(err, auth.ErrProviderDisabled):
+		writeError(w, http.StatusServiceUnavailable, "provider not configured")
+	case errors.Is(err, auth.ErrNotAllowlisted):
+		writeError(w, http.StatusForbidden, "account not allowed")
+	case errors.Is(err, auth.ErrInvalidToken):
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+	case err != nil:
+		log.Printf("auth: %v", err)
+		writeError(w, http.StatusInternalServerError, "sign-in failed")
+	default:
+		writeJSON(w, http.StatusOK, authSessionDocument{
+			UserID:    userID,
+			Token:     token,
+			ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
+		})
+	}
+}
+
 func (h *Handler) postAction(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.requireUser(w, r)
+	if !ok {
+		return
+	}
 	var body struct {
 		ActionID     string          `json:"actionId"`
 		UserID       string          `json:"userId"`
@@ -100,7 +188,7 @@ func (h *Handler) postAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid action")
 		return
 	}
-	seq, err := h.Store.Accept(r.Header.Get("X-User-Id"), r.Header.Get("X-Device-Id"), inventory.Submit{
+	seq, err := h.Store.Accept(userID, r.Header.Get("X-Device-Id"), inventory.Submit{
 		ActionID:     body.ActionID,
 		SongID:       body.SongID,
 		Type:         body.Type,
@@ -127,12 +215,16 @@ func (h *Handler) postAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) actions(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.requireUser(w, r)
+	if !ok {
+		return
+	}
 	since, err := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid cursor")
 		return
 	}
-	list, err := h.Store.ActionsAfter(r.Header.Get("X-User-Id"), since)
+	list, err := h.Store.ActionsAfter(userID, since)
 	switch {
 	case errors.Is(err, inventory.ErrUserID):
 		writeError(w, http.StatusBadRequest, "user id is required")
@@ -154,7 +246,11 @@ func (h *Handler) actions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) snapshot(w http.ResponseWriter, r *http.Request) {
-	cat, err := h.Store.Bootstrap(r.Header.Get("X-User-Id"))
+	userID, ok := h.requireUser(w, r)
+	if !ok {
+		return
+	}
+	cat, err := h.Store.Bootstrap(userID)
 	if errors.Is(err, inventory.ErrUserID) {
 		writeError(w, http.StatusBadRequest, "user id is required")
 		return
@@ -169,10 +265,27 @@ func (h *Handler) snapshot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, cat)
 }
 
+// requireUser resolves the session user from Authorization: Bearer.
+func (h *Handler) requireUser(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if h.Auth == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return "", false
+	}
+	userID, err := h.Auth.UserFromBearer(r.Header.Get("Authorization"))
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return "", false
+	}
+	return userID, true
+}
+
 // song sends the bytes of one present copy. The id is the song; the path
 // stays on the server. A missing song and a song with no present copy are
 // both errors, and neither reports a path.
 func (h *Handler) song(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.requireUser(w, r); !ok {
+		return
+	}
 	id := r.PathValue("id")
 	rel, err := h.Store.PresentPath(id)
 	if errors.Is(err, inventory.ErrSongNotFound) {
@@ -228,6 +341,9 @@ func (h *Handler) song(w http.ResponseWriter, r *http.Request) {
 // cache file is rebuilt from a present copy: its embedded picture, or the
 // iTunes id when that picture is absent.
 func (h *Handler) artwork(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.requireUser(w, r); !ok {
+		return
+	}
 	hash := r.PathValue("hash")
 	f, mime, err := h.Store.OpenArtwork(hash, func(rel string) (io.ReadSeekCloser, error) {
 		full, err := fileUnderRoot(h.Root, rel)
@@ -401,4 +517,10 @@ type errorDocument struct {
 
 type healthDocument struct {
 	OK bool `json:"ok"`
+}
+
+type authSessionDocument struct {
+	UserID    string `json:"userId"`
+	Token     string `json:"token"`
+	ExpiresAt string `json:"expiresAt"`
 }
