@@ -26,7 +26,7 @@ func TestResolveRootFlag(t *testing.T) {
 func TestLoadConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "opus.conf")
-	body := "# site\n\nmusic_root = /srv/my music\napple_client_ids=app.musicclient.ios\napple_allowed=ada@example.com\n"
+	body := "# site\n\nmusic_root = /srv/my music\nauthorized_users=ada@example.com\napple_client_ids=app.hush.ios\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -37,16 +37,16 @@ func TestLoadConfig(t *testing.T) {
 	if cfg.MusicRoot != "/srv/my music" {
 		t.Fatalf("root = %q", cfg.MusicRoot)
 	}
-	if _, ok := cfg.Auth.AppleClientIDs["app.musicclient.ios"]; !ok {
+	if _, ok := cfg.Auth.AppleClientIDs["app.hush.ios"]; !ok {
 		t.Fatalf("apple clients = %#v", cfg.Auth.AppleClientIDs)
 	}
-	if _, ok := cfg.Auth.AppleAllowed["ada@example.com"]; !ok {
-		t.Fatalf("apple allowed = %#v", cfg.Auth.AppleAllowed)
+	if _, ok := cfg.Auth.AuthorizedUsers["ada@example.com"]; !ok {
+		t.Fatalf("authorized users = %#v", cfg.Auth.AuthorizedUsers)
 	}
 }
 
 func TestLoadConfigBothProviders(t *testing.T) {
-	body := "music_root=/a\ngoogle_client_id=g.client\ngoogle_allowed_emails=Ada@Example.com\napple_client_ids=app.musicclient.ios,com.example.web\napple_allowed=ada@example.com,apple.sub\ndev_auth=true\n"
+	body := "music_root=/a\nauthorized_users=Ada@Example.com,apple.sub\ngoogle_client_id=g.client\napple_client_ids=app.hush.ios,com.example.web\n"
 	cfg, err := parseConfig("opus.conf", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -54,14 +54,14 @@ func TestLoadConfigBothProviders(t *testing.T) {
 	if cfg.Auth.GoogleClientID != "g.client" {
 		t.Fatalf("google id = %q", cfg.Auth.GoogleClientID)
 	}
-	if _, ok := cfg.Auth.GoogleAllowedEmails["ada@example.com"]; !ok {
-		t.Fatalf("google emails = %#v", cfg.Auth.GoogleAllowedEmails)
+	if _, ok := cfg.Auth.AuthorizedUsers["ada@example.com"]; !ok {
+		t.Fatalf("authorized users = %#v", cfg.Auth.AuthorizedUsers)
+	}
+	if _, ok := cfg.Auth.AuthorizedUsers["apple.sub"]; !ok {
+		t.Fatalf("authorized users = %#v", cfg.Auth.AuthorizedUsers)
 	}
 	if len(cfg.Auth.AppleClientIDs) != 2 {
 		t.Fatalf("apple clients = %#v", cfg.Auth.AppleClientIDs)
-	}
-	if !cfg.Auth.DevAuth {
-		t.Fatal("dev_auth was not enabled")
 	}
 }
 
@@ -75,6 +75,7 @@ func TestLoadConfigRejects(t *testing.T) {
 		"music_root=/a\n",
 		"music_root=/a\ngoogle_client_id=g\n",
 		"music_root=/a\napple_client_ids=app.x\n",
+		"music_root=/a\nauthorized_users=\ngoogle_client_id=g\n",
 	}
 	for _, body := range cases {
 		_, err := parseConfig("opus.conf", strings.NewReader(body))

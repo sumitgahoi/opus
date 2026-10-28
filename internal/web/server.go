@@ -63,7 +63,6 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /health", h.health)
 	mux.HandleFunc("POST /auth/google", h.authGoogle)
 	mux.HandleFunc("POST /auth/apple", h.authApple)
-	mux.HandleFunc("POST /auth/dev", h.authDev)
 	mux.HandleFunc("GET /inventory.json", h.inventory)
 	mux.HandleFunc("GET /snapshot.json", h.snapshot)
 	mux.HandleFunc("GET /songs/{id}", h.song)
@@ -102,39 +101,6 @@ func (h *Handler) authApple(w http.ResponseWriter, r *http.Request) {
 	h.signIn(w, r, func(idToken string) (string, string, time.Time, error) {
 		return h.Auth.SignInApple(r.Context(), idToken)
 	})
-}
-
-func (h *Handler) authDev(w http.ResponseWriter, r *http.Request) {
-	if h.Auth == nil {
-		writeError(w, http.StatusServiceUnavailable, "sign-in is not configured")
-		return
-	}
-	var body struct {
-		UserID string `json:"userId"`
-	}
-	dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
-	if err := dec.Decode(&body); err != nil || strings.TrimSpace(body.UserID) == "" {
-		writeError(w, http.StatusBadRequest, "user id is required")
-		return
-	}
-	userID, token, expiresAt, err := h.Auth.SignInDev(body.UserID)
-	switch {
-	case errors.Is(err, auth.ErrProviderDisabled):
-		writeError(w, http.StatusServiceUnavailable, "dev sign-in is not enabled")
-	case errors.Is(err, auth.ErrNotAllowlisted):
-		writeError(w, http.StatusForbidden, "account not allowed")
-	case errors.Is(err, auth.ErrInvalidToken):
-		writeError(w, http.StatusBadRequest, "user id is required")
-	case err != nil:
-		log.Printf("auth: %v", err)
-		writeError(w, http.StatusInternalServerError, "sign-in failed")
-	default:
-		writeJSON(w, http.StatusOK, authSessionDocument{
-			UserID:    userID,
-			Token:     token,
-			ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
-		})
-	}
 }
 
 func (h *Handler) signIn(w http.ResponseWriter, r *http.Request, fn func(idToken string) (string, string, time.Time, error)) {

@@ -24,11 +24,8 @@ func TestGoogleAndAppleIDTokens(t *testing.T) {
 	sessions := NewSessions(store.DB())
 	svc := New(sessions, Config{
 		GoogleClientID: "ios.google.client",
-		GoogleAllowedEmails: map[string]struct{}{
-			"ada@example.com": {},
-		},
-		AppleClientIDs: map[string]struct{}{"app.musicclient.ios": {}},
-		AppleAllowed: map[string]struct{}{
+		AppleClientIDs: map[string]struct{}{"app.hush.ios": {}},
+		AuthorizedUsers: map[string]struct{}{
 			"ada@example.com": {},
 			"apple.sub.1":     {},
 		},
@@ -72,23 +69,11 @@ func TestGoogleAndAppleIDTokens(t *testing.T) {
 
 	appleTok := mustSign(t, key, "a1", map[string]any{
 		"iss":   "https://appleid.apple.com",
-		"aud":   "app.musicclient.ios",
+		"aud":   "app.hush.ios",
 		"exp":   now.Add(time.Hour).Unix(),
 		"sub":   "apple.sub.1",
 		"email": "ada@example.com",
 	})
-	if _, _, _, err := svc.SignInDev("ada@example.com"); err != ErrProviderDisabled {
-		t.Fatalf("dev auth off: %v", err)
-	}
-	svc.Config.DevAuth = true
-	devUser, devToken, _, err := svc.SignInDev("Ada@Example.com")
-	if err != nil || devUser != "ada@example.com" || devToken == "" {
-		t.Fatalf("dev sign-in: user=%q token=%q err=%v", devUser, devToken, err)
-	}
-	if _, _, _, err := svc.SignInDev("eve@example.com"); err != ErrNotAllowlisted {
-		t.Fatalf("blocked dev: %v", err)
-	}
-
 	userID, _, _, err = svc.SignInApple(context.Background(), appleTok)
 	if err != nil || userID != "ada@example.com" {
 		t.Fatalf("apple email user=%q err=%v", userID, err)
@@ -96,7 +81,7 @@ func TestGoogleAndAppleIDTokens(t *testing.T) {
 
 	appleSubOnly := mustSign(t, key, "a1", map[string]any{
 		"iss": "https://appleid.apple.com",
-		"aud": "app.musicclient.ios",
+		"aud": "app.hush.ios",
 		"exp": now.Add(time.Hour).Unix(),
 		"sub": "apple.sub.1",
 	})

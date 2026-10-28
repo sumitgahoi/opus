@@ -11,7 +11,7 @@ import (
 // ErrUnauthorized means the bearer token is missing, unknown, or expired.
 var ErrUnauthorized = errors.New("unauthorized")
 
-// ErrNotAllowlisted means the identity verified but is not on the allowlist.
+// ErrNotAllowlisted means the identity verified but is not in authorized_users.
 var ErrNotAllowlisted = errors.New("not allowlisted")
 
 // ErrInvalidToken means the identity token could not be verified.

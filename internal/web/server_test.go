@@ -148,11 +148,8 @@ func serve(t *testing.T, root string, store *inventory.Store) (*httptest.Server,
 	sessions := auth.NewSessions(store.DB())
 	svc := auth.New(sessions, auth.Config{
 		GoogleClientID: "test-google-client",
-		GoogleAllowedEmails: map[string]struct{}{
-			"ada@example.com": {},
-		},
-		AppleClientIDs: map[string]struct{}{"app.musicclient.ios": {}},
-		AppleAllowed: map[string]struct{}{
+		AppleClientIDs: map[string]struct{}{"app.hush.ios": {}},
+		AuthorizedUsers: map[string]struct{}{
 			"ada@example.com": {},
 			"ada.sub":         {},
 		},
@@ -168,11 +165,8 @@ func testAuth(t *testing.T, store *inventory.Store) *auth.Service {
 	sessions := auth.NewSessions(store.DB())
 	return auth.New(sessions, auth.Config{
 		GoogleClientID: "test-google-client",
-		GoogleAllowedEmails: map[string]struct{}{
-			"ada@example.com": {},
-		},
-		AppleClientIDs: map[string]struct{}{"app.musicclient.ios": {}},
-		AppleAllowed: map[string]struct{}{
+		AppleClientIDs: map[string]struct{}{"app.hush.ios": {}},
+		AuthorizedUsers: map[string]struct{}{
 			"ada@example.com": {},
 			"ada.sub":         {},
 		},

@@ -16,12 +16,9 @@ const (
 
 // Config is the sign-in providers enabled for this server.
 type Config struct {
-	GoogleClientID      string
-	GoogleAllowedEmails map[string]struct{}
-	AppleClientIDs      map[string]struct{}
-	AppleAllowed        map[string]struct{} // emails and/or Apple subject ids
-	// DevAuth enables POST /auth/dev for temporary phone login without Apple/Google.
-	DevAuth bool
+	GoogleClientID  string
+	AppleClientIDs  map[string]struct{}
+	AuthorizedUsers map[string]struct{} // emails (lowercased) and/or subject ids
 }
 
 // Service verifies Apple and Google identity tokens and issues sessions.
@@ -60,14 +57,14 @@ func (s *Service) Enabled() bool {
 	return s.GoogleEnabled() || s.AppleEnabled()
 }
 
-// GoogleEnabled is true when a Google client id and allowlist are set.
+// GoogleEnabled is true when a Google client id and authorized users are set.
 func (s *Service) GoogleEnabled() bool {
-	return s.Config.GoogleClientID != "" && len(s.Config.GoogleAllowedEmails) > 0
+	return s.Config.GoogleClientID != "" && len(s.Config.AuthorizedUsers) > 0
 }
 
-// AppleEnabled is true when Apple client ids and an allowlist are set.
+// AppleEnabled is true when Apple client ids and authorized users are set.
 func (s *Service) AppleEnabled() bool {
-	return len(s.Config.AppleClientIDs) > 0 && len(s.Config.AppleAllowed) > 0
+	return len(s.Config.AppleClientIDs) > 0 && len(s.Config.AuthorizedUsers) > 0
 }
 
 // SignInGoogle verifies a Google ID token and returns a session.
@@ -104,36 +101,6 @@ func (s *Service) SignInApple(ctx context.Context, idToken string) (userID, toke
 	return userID, token, expiresAt, err
 }
 
-// SignInDev issues a session for an allowlisted user id without an identity token.
-// Only available when Config.DevAuth is true.
-func (s *Service) SignInDev(userID string) (resolvedUserID, token string, expiresAt time.Time, err error) {
-	if !s.Config.DevAuth {
-		return "", "", time.Time{}, ErrProviderDisabled
-	}
-	resolvedUserID = strings.TrimSpace(userID)
-	if resolvedUserID == "" {
-		return "", "", time.Time{}, ErrInvalidToken
-	}
-	if strings.Contains(resolvedUserID, "@") {
-		resolvedUserID = strings.ToLower(resolvedUserID)
-	}
-	if !s.allowlisted(resolvedUserID) {
-		return "", "", time.Time{}, ErrNotAllowlisted
-	}
-	token, expiresAt, err = s.Sessions.Create(resolvedUserID)
-	return resolvedUserID, token, expiresAt, err
-}
-
-func (s *Service) allowlisted(userID string) bool {
-	if _, ok := s.Config.GoogleAllowedEmails[userID]; ok {
-		return true
-	}
-	if _, ok := s.Config.AppleAllowed[userID]; ok {
-		return true
-	}
-	return false
-}
-
 // UserFromBearer resolves Authorization: Bearer <token>.
 func (s *Service) UserFromBearer(header string) (string, error) {
 	const prefix = "Bearer "
@@ -141,6 +108,11 @@ func (s *Service) UserFromBearer(header string) (string, error) {
 		return "", ErrUnauthorized
 	}
 	return s.Sessions.Lookup(strings.TrimSpace(header[len(prefix):]))
+}
+
+func (s *Service) authorized(id string) bool {
+	_, ok := s.Config.AuthorizedUsers[id]
+	return ok
 }
 
 func (s *Service) verifyGoogleIDToken(ctx context.Context, idToken string) (string, error) {
@@ -177,7 +149,7 @@ func (s *Service) verifyGoogleIDToken(ctx context.Context, idToken string) (stri
 	if email == "" {
 		return "", ErrInvalidToken
 	}
-	if _, ok := s.Config.GoogleAllowedEmails[email]; !ok {
+	if !s.authorized(email) {
 		return "", ErrNotAllowlisted
 	}
 	return email, nil
@@ -215,24 +187,15 @@ func (s *Service) verifyAppleIDToken(ctx context.Context, idToken string) (strin
 		return "", ErrInvalidToken
 	}
 	email := strings.ToLower(strings.TrimSpace(claimString(claims, "email")))
-	allowed := false
-	if email != "" {
-		if _, ok := s.Config.AppleAllowed[email]; ok {
-			allowed = true
-		}
-	}
-	if _, ok := s.Config.AppleAllowed[sub]; ok {
-		allowed = true
-	}
-	if !allowed {
+	emailOK := email != "" && s.authorized(email)
+	subOK := s.authorized(sub)
+	if !emailOK && !subOK {
 		return "", ErrNotAllowlisted
 	}
-	// Prefer email as user id when Apple provided one and it is allowlisted;
+	// Prefer email as user id when Apple provided one and it is authorized;
 	// otherwise the stable Apple subject.
-	if email != "" {
-		if _, ok := s.Config.AppleAllowed[email]; ok {
-			return email, nil
-		}
+	if emailOK {
+		return email, nil
 	}
 	return sub, nil
 }
